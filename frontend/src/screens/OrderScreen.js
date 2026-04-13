@@ -1,12 +1,12 @@
 import React, { useState, useEffect } from 'react'
-import { Button, Row, Col, ListGroup, Image, Card } from 'react-bootstrap'
+import { Button, Row, Col, ListGroup, Image, Card, Modal } from 'react-bootstrap'
 import { Link } from 'react-router-dom'
 import { useDispatch, useSelector } from 'react-redux'
 import { PayPalButton } from 'react-paypal-button-v2'
 import Message from '../components/Message'
 import Loader from '../components/Loader'
-import { getOrderDetails, payOrder, deliverOrder } from '../actions/orderActions'
-import { ORDER_PAY_RESET, ORDER_DELIVER_RESET } from '../constants/orderConstants'
+import { getOrderDetails, payOrder, deliverOrder, cancelOrder } from '../actions/orderActions'
+import { ORDER_PAY_RESET, ORDER_DELIVER_RESET, ORDER_CANCEL_RESET } from '../constants/orderConstants'
 
 function OrderScreen({ match, history }) {
     const orderId = match.params.id
@@ -14,6 +14,7 @@ function OrderScreen({ match, history }) {
 
 
     const [sdkReady, setSdkReady] = useState(false)
+    const [showCancelModal, setShowCancelModal] = useState(false)
 
     const orderDetails = useSelector(state => state.orderDetails)
     const { order, error, loading } = orderDetails
@@ -23,6 +24,9 @@ function OrderScreen({ match, history }) {
 
     const orderDeliver = useSelector(state => state.orderDeliver)
     const { loading: loadingDeliver, success: successDeliver } = orderDeliver
+
+    const orderCancel = useSelector(state => state.orderCancel)
+    const { loading: loadingCancel, success: successCancel, error: errorCancel } = orderCancel
 
     const userLogin = useSelector(state => state.userLogin)
     const { userInfo } = userLogin
@@ -50,9 +54,10 @@ function OrderScreen({ match, history }) {
             history.push('/login')
         }
 
-        if (!order || successPay || order._id !== Number(orderId) || successDeliver) {
+        if (!order || successPay || order._id !== Number(orderId) || successDeliver || successCancel) {
             dispatch({ type: ORDER_PAY_RESET })
             dispatch({ type: ORDER_DELIVER_RESET })
+            dispatch({ type: ORDER_CANCEL_RESET })
 
             dispatch(getOrderDetails(orderId))
         } else if (!order.isPaid) {
@@ -62,7 +67,7 @@ function OrderScreen({ match, history }) {
                 setSdkReady(true)
             }
         }
-    }, [dispatch, order, orderId, successPay, successDeliver])
+    }, [dispatch, order, orderId, successPay, successDeliver, successCancel])
 
 
     const successPaymentHandler = (paymentResult) => {
@@ -72,6 +77,17 @@ function OrderScreen({ match, history }) {
     const deliverHandler = () => {
         dispatch(deliverOrder(order))
     }
+
+    const cancelHandler = () => {
+        setShowCancelModal(true)
+    }
+
+    const confirmCancelHandler = () => {
+        dispatch(cancelOrder(orderId))
+        setShowCancelModal(false)
+    }
+
+    const canCancel = !order.isDelivered && !order.isCancelled
 
     return loading ? (
         <Loader />
@@ -96,7 +112,9 @@ function OrderScreen({ match, history }) {
                                         {order.shippingAddress.country}
                                     </p>
 
-                                    {order.isDelivered ? (
+                                    {order.isCancelled ? (
+                                        <Message variant='danger'>Cancelled on {order.cancelledAt}</Message>
+                                    ) : order.isDelivered ? (
                                         <Message variant='success'>Delivered on {order.deliveredAt}</Message>
                                     ) : (
                                             <Message variant='warning'>Not Delivered</Message>
@@ -184,7 +202,7 @@ function OrderScreen({ match, history }) {
                                     </ListGroup.Item>
 
 
-                                    {!order.isPaid && (
+                                    {!order.isPaid && !order.isCancelled && (
                                         <ListGroup.Item>
                                             {loadingPay && <Loader />}
 
@@ -200,7 +218,7 @@ function OrderScreen({ match, history }) {
                                     )}
                                 </ListGroup>
                                 {loadingDeliver && <Loader />}
-                                {userInfo && userInfo.isAdmin && order.isPaid && !order.isDelivered && (
+                                {userInfo && userInfo.isAdmin && order.isPaid && !order.isDelivered && !order.isCancelled && (
                                     <ListGroup.Item>
                                         <Button
                                             type='button'
@@ -211,9 +229,67 @@ function OrderScreen({ match, history }) {
                                         </Button>
                                     </ListGroup.Item>
                                 )}
+                                {loadingCancel && <Loader />}
+                                {errorCancel && <Message variant='danger'>{errorCancel}</Message>}
+                                {canCancel && (
+                                    <ListGroup.Item>
+                                        <Button
+                                            type='button'
+                                            className='btn btn-block btn-danger'
+                                            onClick={cancelHandler}
+                                        >
+                                            Cancel Order
+                                        </Button>
+                                    </ListGroup.Item>
+                                )}
                             </Card>
                         </Col>
                     </Row>
+
+                    <Modal show={showCancelModal} onHide={() => setShowCancelModal(false)}>
+                        <Modal.Header closeButton>
+                            <Modal.Title>Cancel Order</Modal.Title>
+                        </Modal.Header>
+                        <Modal.Body>
+                            <p>Are you sure you want to cancel this order?</p>
+                            {order.isPaid && (
+                                <p className="text-warning">
+                                    <strong>Note:</strong> Since this order has been paid, a refund will be processed.
+                                </p>
+                            )}
+                        </Modal.Body>
+                        <Modal.Footer>
+                            <Button variant="secondary" onClick={() => setShowCancelModal(false)}>
+                                No, Keep Order
+                            </Button>
+                            <Button variant="danger" onClick={confirmCancelHandler}>
+                                Yes, Cancel Order
+                            </Button>
+                        </Modal.Footer>
+                    </Modal>
+                </div>
+            )
+}
+
+export default OrderScreen
+                        </Modal.Header>
+                        <Modal.Body>
+                            <p>Are you sure you want to cancel this order?</p>
+                            {order.isPaid && (
+                                <p className="text-warning">
+                                    <strong>Note:</strong> Since this order has been paid, a refund will be processed.
+                                </p>
+                            )}
+                        </Modal.Body>
+                        <Modal.Footer>
+                            <Button variant="secondary" onClick={() => setShowCancelModal(false)}>
+                                No, Keep Order
+                            </Button>
+                            <Button variant="danger" onClick={confirmCancelHandler}>
+                                Yes, Cancel Order
+                            </Button>
+                        </Modal.Footer>
+                    </Modal>
                 </div>
             )
 }

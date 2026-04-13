@@ -1,10 +1,11 @@
 from django.shortcuts import render
+from django.db import transaction
 
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated, IsAdminUser
 from rest_framework.response import Response
 
-from base.models import Product, Order, OrderItem, ShippingAddress
+from base.models import Product, Order, OrderItem, ShippingAddress, Refund
 from base.serializers import ProductSerializer, OrderSerializer
 
 from rest_framework import status
@@ -122,3 +123,63 @@ def updateOrderToDelivered(request, pk):
     order.save()
 
     return Response('Order was delivered')
+
+
+@api_view(['PUT'])
+@permission_classes([IsAuthenticated])
+def cancelOrder(request, pk):
+    user = request.user
+
+    try:
+        order = Order.objects.get(_id=pk)
+
+        if not user.is_staff and order.user != user:
+            return Response(
+                {'detail': 'Not authorized to cancel this order'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        if order.isCancelled:
+            return Response(
+                {'detail': 'Order is already cancelled'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        if order.isDelivered:
+            return Response(
+                {'detail': 'Cannot cancel a delivered order'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        with transaction.atomic():
+            orderItems = OrderItem.objects.filter(order=order)
+            for item in orderItems:
+                product = item.product
+                product.countInStock += item.qty
+                product.save()
+
+            order.isCancelled = True
+            order.cancelledAt = datetime.now()
+            order.save()
+
+            if order.isPaid:
+                Refund.objects.create(
+                    order=order,
+                    user=order.user,
+                    amount=order.totalPrice,
+                    paymentMethod=order.paymentMethod,
+                    reason='Order cancelled by user'
+                )
+
+        return Response('Order was cancelled')
+
+    except Order.DoesNotExist:
+        return Response(
+            {'detail': 'Order does not exist'},
+            status=status.HTTP_404_NOT_FOUND
+        )
+    except Exception as e:
+        return Response(
+            {'detail': str(e)},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
